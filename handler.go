@@ -55,28 +55,52 @@ type CaddyCSPHandler struct {
 	logger  *zap.Logger
 	Cmd     []CmdType
 }
+type headerInterceptor struct {
+	http.ResponseWriter
+	wrote  bool
+	logger *zap.Logger
+	Cmd    []CmdType
+}
+
+func (h *headerInterceptor) WriteHeader(statusCode int) {
+	if !h.wrote {
+		cspHeader := h.Header().Get("Content-Security-Policy")
+		csp, warn := NewCSPFromHeader(cspHeader)
+		if warn != nil {
+			h.logger.Warn(warn.Error())
+		}
+		if csp != nil {
+			h.ApplyAll(csp)
+			encoded := csp.Encoded()
+			if encoded != "" {
+				h.Header().Set("Content-Security-Policy", encoded)
+			}
+		}
+		h.wrote = true
+	}
+	h.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (h *headerInterceptor) Write(b []byte) (int, error) {
+	if !h.wrote {
+		h.WriteHeader(http.StatusOK)
+	}
+	return h.ResponseWriter.Write(b)
+}
 
 func (h *CaddyCSPHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request, next caddyhttp.Handler) error {
 	if !h.Enabled {
 		return next.ServeHTTP(writer, request)
 	}
-	cspHeader := writer.Header().Get("Content-Security-Policy")
-	csp, warn := NewCSPFromHeader(cspHeader)
-	if warn != nil {
-		h.logger.Warn(warn.Error())
+	interceptor := &headerInterceptor{
+		ResponseWriter: writer,
+		Cmd:            h.Cmd,
+		logger:         h.logger,
 	}
-	if csp == nil {
-		return next.ServeHTTP(writer, request)
-	}
-
-	h.ApplyAll(csp)
-	encoded := csp.Encoded()
-
-	writer.Header().Set("Content-Security-Policy", encoded)
-	return next.ServeHTTP(writer, request)
+	return next.ServeHTTP(interceptor, request)
 }
 
-func (h *CaddyCSPHandler) ApplyAll(csp *CSP) {
+func (h *headerInterceptor) ApplyAll(csp *CSP) {
 	for _, cmd := range h.Cmd {
 		k, v := cmd.Key, cmd.Values
 		switch cmd.Op {
