@@ -6,6 +6,7 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
 	"net/http"
+	"strings"
 )
 
 const LiteralAll = "!all"
@@ -90,6 +91,9 @@ func (h *headerInterceptor) Write(b []byte) (int, error) {
 
 func (h *CaddyCSPHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request, next caddyhttp.Handler) error {
 	if !h.Enabled {
+		return next.ServeHTTP(writer, request)
+	}
+	if strings.EqualFold(request.Header.Get("Upgrade"), "websocket") {
 		return next.ServeHTTP(writer, request)
 	}
 	interceptor := &headerInterceptor{
