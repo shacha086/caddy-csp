@@ -107,6 +107,6 @@ func (c *CSP) Set(directive string, sources ...string) {
 
 func (c *CSP) SetAllDirective(sources ...string) {
 	for k := range c.commands.KeysFromOldest() {
-		c.Remove(k, sources...)
+		c.Set(k, sources...)
 	}
 }

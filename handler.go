@@ -8,6 +8,8 @@ import (
 	"net/http"
 )
 
+const LiteralAll = "!all"
+
 func init() {
 	caddy.RegisterModule(&CaddyCSPHandler{})
 	httpcaddyfile.RegisterHandlerDirective("csp", parseCaddyFile)
@@ -21,9 +23,7 @@ func (h *CaddyCSPHandler) Provision(ctx caddy.Context) error {
 func parseCaddyFile(helper httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) {
 	csp := &CaddyCSPHandler{
 		Enabled: false,
-		Add:     make(map[string][]string),
-		Remove:  make(map[string][]string),
-		Set:     make(map[string][]string),
+		Cmd:     nil,
 	}
 	for helper.Next() {
 		for helper.NextBlock(0) {
@@ -35,38 +35,30 @@ func parseCaddyFile(helper httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, e
 			k := args[0]
 			v := args[1:]
 
-			switch cmd {
-			case "add":
+			if cmd == "add" || cmd == "remove" || cmd == "set" {
 				csp.Enabled = true
-				SetOrAppend(csp.Add, k, v...)
-			case "remove":
-				csp.Enabled = true
-				SetOrAppend(csp.Remove, k, v...)
-			case "set":
-				csp.Enabled = true
-				SetOrAppend(csp.Set, k, v...)
+				csp.Cmd = append(csp.Cmd, CmdType{Op: cmd, Key: k, Values: v})
 			}
 		}
 	}
-
 	return csp, nil
+}
+
+type CmdType struct {
+	Op     string // "add", "remove", "set"
+	Key    string
+	Values []string
 }
 
 type CaddyCSPHandler struct {
 	Enabled bool
 	logger  *zap.Logger
-	Add     map[string][]string `json:"add,omitempty"`
-	Remove  map[string][]string `json:"remove,omitempty"`
-	Set     map[string][]string `json:"set,omitempty"`
+	Cmd     []CmdType
 }
 
 func (h *CaddyCSPHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request, next caddyhttp.Handler) error {
 	if !h.Enabled {
 		return next.ServeHTTP(writer, request)
-	}
-	err := next.ServeHTTP(writer, request)
-	if err != nil {
-		return err
 	}
 	cspHeader := writer.Header().Get("Content-Security-Policy")
 	csp, warn := NewCSPFromHeader(cspHeader)
@@ -74,43 +66,39 @@ func (h *CaddyCSPHandler) ServeHTTP(writer http.ResponseWriter, request *http.Re
 		h.logger.Warn(warn.Error())
 	}
 	if csp == nil {
-		return nil
+		return next.ServeHTTP(writer, request)
 	}
 
-	h.ApplyAdd(csp)
-	h.ApplyRemove(csp)
-	h.ApplySet(csp)
+	h.ApplyAll(csp)
+	encoded := csp.Encoded()
 
-	writer.Header().Set("Content-Security-Policy", csp.Encoded())
-	return nil
+	writer.Header().Set("Content-Security-Policy", encoded)
+	return next.ServeHTTP(writer, request)
 }
 
-func (h *CaddyCSPHandler) ApplyAdd(csp *CSP) {
-	for k, v := range h.Add {
-		if k != "all" {
-			csp.Add(k, v...)
-		} else {
-			csp.AddAllDirective(v...)
-		}
-	}
-}
+func (h *CaddyCSPHandler) ApplyAll(csp *CSP) {
+	for _, cmd := range h.Cmd {
+		k, v := cmd.Key, cmd.Values
+		switch cmd.Op {
+		case "add":
+			if k != LiteralAll {
+				csp.Add(k, v...)
+			} else {
+				csp.AddAllDirective(v...)
 
-func (h *CaddyCSPHandler) ApplyRemove(csp *CSP) {
-	for k, v := range h.Remove {
-		if k != "all" {
-			csp.Remove(k, v...)
-		} else {
-			csp.RemoveAllDirective(v...)
-		}
-	}
-}
-
-func (h *CaddyCSPHandler) ApplySet(csp *CSP) {
-	for k, v := range h.Set {
-		if k != "all" {
-			csp.Set(k, v...)
-		} else {
-			csp.SetAllDirective(v...)
+			}
+		case "remove":
+			if k != LiteralAll {
+				csp.Remove(k, v...)
+			} else {
+				csp.RemoveAllDirective(v...)
+			}
+		case "set":
+			if k != LiteralAll {
+				csp.Set(k, v...)
+			} else {
+				csp.SetAllDirective(v...)
+			}
 		}
 	}
 }
