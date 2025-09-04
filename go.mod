@@ -1,4 +1,4 @@
-module caddy-csp
+module github.com/shacha086/caddy-csp
 
 go 1.25
 
