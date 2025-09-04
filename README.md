@@ -1,3 +1,6 @@
+Installation:
+``xcaddy build --with github.com/shacha086/caddy-csp``
+
 Example use:
 ```Caddyfile
 :8080 {
