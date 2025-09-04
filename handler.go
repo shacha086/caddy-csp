@@ -62,10 +62,57 @@ type CaddyCSPHandler struct {
 
 func (h *CaddyCSPHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request, next caddyhttp.Handler) error {
 	if !h.Enabled {
+		return next.ServeHTTP(writer, request)
+	}
+	err := next.ServeHTTP(writer, request)
+	if err != nil {
+		return err
+	}
+	cspHeader := writer.Header().Get("Content-Security-Policy")
+	csp, warn := NewCSPFromHeader(cspHeader)
+	if warn != nil {
+		h.logger.Warn(warn.Error())
+	}
+	if csp == nil {
 		return nil
 	}
-	//cspHeader := writer.Header().Get("Content-Security-Policy")
+
+	h.ApplyAdd(csp)
+	h.ApplyRemove(csp)
+	h.ApplySet(csp)
+
+	writer.Header().Set("Content-Security-Policy", csp.Encoded())
 	return nil
+}
+
+func (h *CaddyCSPHandler) ApplyAdd(csp *CSP) {
+	for k, v := range h.Add {
+		if k != "all" {
+			csp.Add(k, v...)
+		} else {
+			csp.AddAllDirective(v...)
+		}
+	}
+}
+
+func (h *CaddyCSPHandler) ApplyRemove(csp *CSP) {
+	for k, v := range h.Remove {
+		if k != "all" {
+			csp.Remove(k, v...)
+		} else {
+			csp.RemoveAllDirective(v...)
+		}
+	}
+}
+
+func (h *CaddyCSPHandler) ApplySet(csp *CSP) {
+	for k, v := range h.Set {
+		if k != "all" {
+			csp.Set(k, v...)
+		} else {
+			csp.SetAllDirective(v...)
+		}
+	}
 }
 
 func (*CaddyCSPHandler) CaddyModule() caddy.ModuleInfo {
