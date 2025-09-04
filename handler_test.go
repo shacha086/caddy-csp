@@ -10,7 +10,7 @@ import (
 
 type fakeHandler struct{}
 
-func (fakeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) error {
+func (fakeHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) error {
 	w.Header().Set("Content-Security-Policy", "default-src 'self';")
 	w.WriteHeader(http.StatusOK)
 	return nil
@@ -23,15 +23,21 @@ func TestCaddyCSPHandler(t *testing.T) {
 	// 构造 CSP 中间件
 	h := &CaddyCSPHandler{
 		Enabled: true,
-		Add: map[string][]string{
-			"default-src": {src},
+		Cmd: []CmdType{{
+			Op:     "add",
+			Key:    "default-src",
+			Values: []string{src},
 		},
-		Remove: map[string][]string{
-			"default-src": {"'self'"},
-		},
-		Set: map[string][]string{
-			"script-src": {"'none'"},
-		},
+			{
+				Op:     "remove",
+				Key:    "default-src",
+				Values: []string{"'self'"},
+			},
+			{
+				Op:     "set",
+				Key:    "script-src",
+				Values: []string{"'none'"},
+			}},
 		logger: zap.NewNop(), // 不输出日志
 	}
 
